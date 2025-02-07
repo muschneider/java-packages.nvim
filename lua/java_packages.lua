@@ -234,16 +234,18 @@ M.show_java_classes = function(files)
 					M.show_java_packages()
 				end)
 
+				map("i", "<C-n>", function(prompt_bufnr)
+					create_new_class(selected_package)
+					close_telescope_picker_safe()
+				end)
+
 				map("i", "<CR>", function(prompt_bufnr)
-					--vim.cmd("tabnew") -- Opens a new tab
-					--vim.cmd("enew") -- Creates a new empty buffer
 					local selected_class = action_state.get_selected_entry(prompt_bufnr).value
 					local filepath = "src/main/java/"
 						.. string.gsub(selected_package, "%.", "/")
 						.. "/"
 						.. selected_class
-					vim.cmd("tabnew")
-					vim.cmd("edit " .. filepath)
+					vim.cmd("edit! " .. filepath)
 				end)
 				return true
 			end,
