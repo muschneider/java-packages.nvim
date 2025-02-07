@@ -20,10 +20,7 @@ local M = {}
 
 local selected_package
 
--- Function to insert a Java class snippet (including package) into a specified file
-local function insert_class_snippet_into_file(file_path)
-	-- Define the Java class snippet content with a package declaration
-	local class_snippet = [[
+local class_snippet = [[
 package ${1:package_name};
 
 public class ${2:ClassName} {
@@ -31,6 +28,21 @@ public class ${2:ClassName} {
 }
 ]]
 
+--
+-- Get the file type of the current buffer
+local function get_file_type()
+	local paths = {
+		java = "src/main/java",
+		scala = "src/main/scala",
+	}
+	return paths[vim.bo.filetype] or "src/main/java"
+end
+--
+
+-- Function to insert a Java class snippet (including package) into a specified file
+local function insert_class_snippet_into_file(file_path)
+	-- Define the Java class snippet content with a package declaration
+	local file_type = get_file_type()
 	-- Check if the file already exists
 	local file_exists = vim.fn.filereadable(file_path) == 1
 	if file_exists then
@@ -38,11 +50,11 @@ public class ${2:ClassName} {
 		return -- Exit the function without doing anything if the file exists
 	end
 
-	-- Get the directory from the file path (this assumes the file_path includes "src/main/java")
+	-- Get the directory from the file path
 	local dir = vim.fn.fnamemodify(file_path, ":p:h")
 
-	-- Remove the "src/main/java" part of the path to get the package structure
-	local package_path = dir:match("src/main/java/(.+)$")
+	-- Remove the beginning part of the path to get the package structure
+	local package_path = dir:match(file_type .. "/(.+)$")
 
 	-- If the package path is found, replace slashes with dots
 	if package_path then
@@ -82,6 +94,7 @@ public class ${2:ClassName} {
 end
 
 local function create_new_class(package_name)
+	local file_type = get_file_type()
 	vim.ui.input({
 		prompt = "Class Name: ",
 		default = package_name .. ".",
@@ -89,7 +102,7 @@ local function create_new_class(package_name)
 		-- If the user pressed Enter (input is not nil), update the line
 		if input then
 			input = string.gsub(input, "%.java", "") -- It'll remove the file extension if it has one
-			local complete_path = "./src/main/java/" .. string.gsub(input, "%.", "/") .. ".java"
+			local complete_path = "./" .. file_type .. "/" .. string.gsub(input, "%.", "/") .. ".java"
 			insert_class_snippet_into_file(complete_path)
 			vim.cmd("tabnew")
 			vim.cmd("edit " .. complete_path)
@@ -103,11 +116,14 @@ end
 -- Scan Java Project to search packages and Classes
 --
 local function get_java_packages()
-	local java_folder = Path:new("src/main/java")
+	local source_folder = Path:new(get_file_type())
+	--local source_folder = Path.new(vim.fn.getcwd() .. "/" .. get_file_type())
+
+	log.debug("\n\nSource Folder: ", source_folder, "\n File Type: ", get_file_type(), "\n CWD: ", vim.fn.getcwd())
 
 	-- Check if the folder exists
-	if not java_folder:exists() then
-		print("Error: src/main/java folder does not exist.")
+	if not source_folder:exists() then
+		print("Error: " .. get_file_type() .. " folder does not exist.")
 		return {}, {}
 	end
 
@@ -116,13 +132,12 @@ local function get_java_packages()
 	local package_files = {}
 
 	-- Scan the directory recursively
-	scandir.scan_dir(tostring(java_folder), {
+	scandir.scan_dir(tostring(source_folder), {
 		depth = math.huge,
 		add_dirs = false,
-		search_pattern = "%.java$", -- Look for .java files
+		search_pattern = "%.java$",
 		on_insert = function(file)
-			-- Extract the relative path and replace / with . for package format
-			local relative_path = Path:new(file):make_relative(tostring(java_folder))
+			local relative_path = Path:new(file):make_relative(tostring(source_folder))
 			local package_path = relative_path:gsub("/[^/]+%.java$", ""):gsub("/", ".")
 			packages[package_path] = true
 			package_files[package_path] = package_files[package_path] or {}
@@ -139,6 +154,9 @@ local function get_java_packages()
 	return package_list, package_files
 end
 
+--
+-- Close the Telescope picker if it's open
+--
 local function close_telescope_picker_safe()
 	-- Check if the popup menu is visible (this indicates a picker is open)
 	if vim.fn.pumvisible() == 1 then
@@ -149,7 +167,7 @@ local function close_telescope_picker_safe()
 end
 
 --
--- show java packages in Telescope
+-- Show java packages in Telescope
 --
 M.show_java_packages = function(opts)
 	local packages, package_files = get_java_packages()
@@ -196,10 +214,11 @@ M.show_java_packages = function(opts)
 			previewer = previewers.new_buffer_previewer({
 				title = "Java Classes",
 				define_preview = function(self, entry)
+					local file_type = get_file_type()
 					local pkg_path = string.gsub(entry.value, "%.", "/")
 					local files = package_files[entry.value]
 					for i = 1, #files do
-						files[i] = Path:new(files[i]):make_relative(tostring(Path:new("src/main/java")))
+						files[i] = Path:new(files[i]):make_relative(tostring(Path:new(file_type)))
 						files[i] = string.gsub(files[i], pkg_path .. "/", "")
 					end
 					vim.api.nvim_buf_set_lines(self.state.bufnr, 0, 0, true, files)
@@ -222,7 +241,7 @@ M.show_java_classes = function(files)
 				entry_maker = function(file)
 					return {
 						value = file,
-						display = Path:new(file):make_relative(tostring(Path:new("src/main/java"))),
+						display = Path:new(file):make_relative(tostring(Path:new(get_file_type()))),
 						ordinal = file,
 					}
 				end,
@@ -241,7 +260,8 @@ M.show_java_classes = function(files)
 
 				map("i", "<CR>", function(prompt_bufnr)
 					local selected_class = action_state.get_selected_entry(prompt_bufnr).value
-					local filepath = "src/main/java/"
+					local filepath = get_file_type()
+						.. "/"
 						.. string.gsub(selected_package, "%.", "/")
 						.. "/"
 						.. selected_class
@@ -252,7 +272,11 @@ M.show_java_classes = function(files)
 
 			previewer = previewers.new_buffer_previewer({
 				define_preview = function(self, entry, _)
-					local filepath = "src/main/java/" .. string.gsub(selected_package, "%.", "/") .. "/" .. entry.value
+					local filepath = get_file_type()
+						.. "/"
+						.. string.gsub(selected_package, "%.", "/")
+						.. "/"
+						.. entry.value
 					local bufnr = self.state.bufnr
 					if vim.fn.filereadable(filepath) == 1 then
 						local content = vim.fn.readfile(filepath)
